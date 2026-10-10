@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pixel Place — lienzo compartido</title>
+  <style>
+    :root { color-scheme: dark; --bg:#10131b; --panel:#191e2a; --line:#30384a; --text:#f4f6fb; --muted:#aab3c5; --accent:#8b7cff; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:system-ui,-apple-system,Segoe UI,sans-serif; background:radial-gradient(ellipse at top,#202641 0,#10131b 55%); color:var(--text); min-height:100vh; }
+    main { max-width:1050px; margin:0 auto; padding:26px 16px 40px; }
+    header { text-align:center; margin-bottom:22px; }
+    .eyebrow { color:#a99fff; text-transform:uppercase; letter-spacing:.16em; font-size:.75rem; font-weight:800; }
+    h1 { margin:8px 0; font-size:clamp(2rem,6vw,3.5rem); letter-spacing:-.05em; }
+    header p { margin:0 auto; max-width:660px; color:var(--muted); line-height:1.5; }
+    .layout { display:grid; grid-template-columns:minmax(0,1fr) 260px; gap:16px; align-items:start; }
+    .panel { background:rgba(25,30,42,.94); border:1px solid var(--line); border-radius:18px; padding:16px; box-shadow:0 16px 50px #0002; min-width:0; }
+    .board-wrap { overflow:auto; border-radius:10px; background:#0a0c11; padding:8px; }
+    canvas { display:block; width:100%; max-width:100%; height:auto; image-rendering:pixelated; cursor:crosshair; touch-action:manipulation; }
+    .board-heading { display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px; }
+    h2 { font-size:1rem; margin:0; }
+    .counter,.muted { font-size:.82rem; color:var(--muted); }
+    .palette { display:grid; grid-template-columns:repeat(5,1fr); gap:8px; margin:12px 0 16px; }
+    .swatch { aspect-ratio:1; border:2px solid #ffffff24; border-radius:10px; cursor:pointer; }
+    .swatch[aria-pressed="true"] { outline:3px solid white; outline-offset:2px; }
+    button:focus-visible { outline:3px solid #c4bdff; outline-offset:3px; }
+    button { font:inherit; border:0; border-radius:10px; padding:10px 12px; cursor:pointer; font-weight:700; }
+    .primary { width:100%; background:var(--accent); color:white; }
+    .secondary { background:#2b3243; color:var(--text); }
+    .hint { color:var(--muted); font-size:.86rem; line-height:1.5; }
+    .status { min-height:2.8em; margin:12px 0 0; font-size:.88rem; color:#c6c0ff; line-height:1.4; }
+    .pill { display:inline-flex; align-items:center; gap:6px; border-radius:999px; padding:5px 9px; background:#2b3243; font-size:.76rem; color:#e5e7eb; }
+    .dot { width:7px; height:7px; border-radius:50%; background:#f59e0b; }
+    .dot.online { background:#22c55e; }
+    .note { margin-top:16px; border-left:3px solid var(--accent); padding:10px 12px; background:#8b7cff12; border-radius:0 8px 8px 0; color:var(--muted); font-size:.84rem; line-height:1.5; }
+    .actions { display:flex; gap:8px; margin-top:10px; }
+    .actions button { flex:1; }
+    #cooldown { font-weight:700; }
+    @media(max-width:720px) { .layout { grid-template-columns:1fr; } .tools { order:-1; } .palette { grid-template-columns:repeat(10,1fr); } main { padding:20px 12px 30px; } }
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div class="eyebrow">Lienzo colaborativo · en tiempo real</div>
+    <h1>🎨 Pixel Place</h1>
+    <p>Un solo lienzo para todos. Elige un color y pinta una casilla; los demás verán el cambio al instante. Puedes colocar un píxel cada 3 segundos.</p>
+  </header>
+  <section class="layout">
+    <div class="panel">
+      <div class="board-heading">
+        <h2>Lienzo compartido · 40 × 40</h2>
+        <span class="counter" id="counter">Conectando…</span>
+      </div>
+      <div class="board-wrap">
+        <canvas id="board" width="800" height="800" aria-label="Lienzo compartido de 40 por 40 píxeles"></canvas>
+      </div>
+      <p class="status" id="status" aria-live="polite">Conectando con la base de datos…</p>
+    </div>
+    <aside class="panel tools">
+      <div class="board-heading">
+        <h2>Paleta de colores</h2>
+        <span class="pill"><span class="dot" id="dot"></span><span id="connection">Conectando</span></span>
+      </div>
+      <p class="hint">Selecciona un color y toca una casilla del lienzo.</p>
+      <div class="palette" id="palette" aria-label="Colores"></div>
+      <button class="primary" id="export">Descargar lienzo PNG</button>
+      <p class="status" id="cooldown">Límite: 1 píxel cada 3 segundos.</p>
+    
+    </aside>
+  </section>
+</main>
+
+<script type="module">
+  // 1) Reemplaza estos valores por la configuración de tu aplicación web de Firebase.
+  // Firebase Console → Project settings (⚙) → General → Your apps → SDK setup and configuration.
+  const firebaseConfig = {
+
+  apiKey: "AIzaSyA5ONtRKNlLGCof0FPsjCDcRbQzx3I9KcQ",
+
+  authDomain: "pixel-f4d01.firebaseapp.com",
+
+  databaseURL: "https://pixel-f4d01-default-rtdb.firebaseio.com",
+
+  projectId: "pixel-f4d01",
+
+  storageBucket: "pixel-f4d01.firebasestorage.app",
+
+  messagingSenderId: "586323792959",
+
+  appId: "1:586323792959:web:d874e507df541a7dc3948a"
+
+};
+
+
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-app.js";
+  import { getDatabase, ref, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-database.js";
+
+  const SIZE = 40;
+  const COOLDOWN_MS = 3000;
+  const COLORS = [
+    "#ffffff", "#cbd5e1", "#64748b", "#111827", "#ef4444",
+    "#f97316", "#facc15", "#84cc16", "#22c55e", "#14b8a6",
+    "#06b6d4", "#3b82f6", "#6366f1", "#8b5cf6", "#d946ef",
+    "#ec4899", "#92400e", "#78350f", "#fda4af", "#000000"
+  ];
+  const canvas = document.getElementById("board");
+  const ctx = canvas.getContext("2d");
+  const palette = document.getElementById("palette");
+  const statusEl = document.getElementById("status");
+  const counter = document.getElementById("counter");
+  const connection = document.getElementById("connection");
+  const dot = document.getElementById("dot");
+  const cooldownEl = document.getElementById("cooldown");
+  let selectedColor = COLORS[4];
+  let pixels = {};
+  let database;
+  let lastPaintAt = 0;
+  let paintInProgress = false;
+
+  function setConnection(ok, message) {
+    connection.textContent = message;
+    dot.classList.toggle("online", ok);
+  }
+  function showError(message) {
+    setConnection(false, "Error");
+    statusEl.textContent = message;
+  }
+  function render() {
+    const cell = canvas.width / SIZE;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let count = 0;
+    for (let y = 0; y < SIZE; y++) {
+      for (let x = 0; x < SIZE; x++) {
+        const color = pixels[`${x}_${y}`] || null;
+        if (color) count++;
+        ctx.fillStyle = color || "#202532";
+        ctx.fillRect(x * cell, y * cell, cell, cell);
+        ctx.strokeStyle = "#343b4b";
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x * cell + .5, y * cell + .5, cell, cell);
+      }
+    }
+    counter.textContent = `${count} / ${SIZE * SIZE} píxeles pintados`;
+  }
+  function updateCooldown() {
+    const remaining = Math.max(0, COOLDOWN_MS - (Date.now() - lastPaintAt));
+    if (remaining > 0) {
+      cooldownEl.textContent = `Puedes pintar otra vez en ${(remaining / 1000).toFixed(1)} s`;
+      window.setTimeout(updateCooldown, Math.min(100, remaining));
+    } else {
+      cooldownEl.textContent = "¡Listo para pintar! · 1 píxel cada 3 s";
+    }
+  }
+  COLORS.forEach((color, index) => {
+    const button = document.createElement("button");
+    button.className = "swatch";
+    button.style.background = color;
+    button.title = `Color ${index + 1}: ${color}`;
+    button.setAttribute("aria-label", `Seleccionar color ${color}`);
+    button.setAttribute("aria-pressed", String(color === selectedColor));
+    button.addEventListener("click", () => {
+      selectedColor = color;
+      palette.querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", "false"));
+      button.setAttribute("aria-pressed", "true");
+      statusEl.textContent = `Color seleccionado: ${color}. Toca una casilla para pintarla.`;
+    });
+    palette.appendChild(button);
+  });
+
+  const missingConfig = Object.values(firebaseConfig).some(value =>
+    typeof value !== "string" || value.startsWith("PEGA_AQUI")
+  );
+  if (missingConfig) {
+    setConnection(false, "Falta configuración");
+    statusEl.textContent = "Primero pega la configuración de Firebase en firebaseConfig dentro de index.html.";
+    render();
+  } else {
+    try {
+      const app = initializeApp(firebaseConfig);
+      database = getDatabase(app);
+      const boardRef = ref(database, "pixelPlace/board");
+      onValue(boardRef, snapshot => {
+        pixels = snapshot.val() || {};
+        render();
+        setConnection(true, "En línea");
+        statusEl.textContent = "Conectado. Los cambios del grupo aparecerán aquí automáticamente.";
+      }, error => {
+        showError(`No se pudo leer Firebase: ${error.message}. Revisa las reglas y la URL de la base de datos.`);
+      });
+    } catch (error) {
+      showError(`No se pudo iniciar Firebase: ${error.message}`);
+    }
+  }
+
+  canvas.addEventListener("pointerdown", async event => {
+    if (!database) {
+      statusEl.textContent = "Configura Firebase primero para poder compartir píxeles.";
+      return;
+    }
+    if (paintInProgress) return;
+    const now = Date.now();
+    const remaining = COOLDOWN_MS - (now - lastPaintAt);
+    if (remaining > 0) {
+      statusEl.textContent = `Espera ${(remaining / 1000).toFixed(1)} segundos antes de pintar otro píxel.`;
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const x = Math.floor((event.clientX - rect.left) / rect.width * SIZE);
+    const y = Math.floor((event.clientY - rect.top) / rect.height * SIZE);
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+    paintInProgress = true;
+    try {
+      // El cooldown local mejora la experiencia; las reglas del backend deben proteger los datos
+      // en producción, porque un límite solo en JavaScript se puede saltar.
+      await runTransaction(ref(database, `pixelPlace/board/${x}_${y}`), () => selectedColor);
+      lastPaintAt = Date.now();
+      updateCooldown();
+      statusEl.textContent = `Píxel (${x + 1}, ${y + 1}) actualizado para todos.`;
+    } catch (error) {
+      statusEl.textContent = `No se pudo pintar: ${error.message}. Revisa las reglas de Realtime Database.`;
+    } finally {
+      paintInProgress = false;
+    }
+  });
+
+  document.getElementById("export").addEventListener("click", () => {
+    const output = document.createElement("canvas");
+    output.width = SIZE;
+    output.height = SIZE;
+    const out = output.getContext("2d");
+    Object.entries(pixels).forEach(([key, color]) => {
+      const [x, y] = key.split("_").map(Number);
+      if (Number.isInteger(x) && Number.isInteger(y) && x >= 0 && x < SIZE && y >= 0 && y < SIZE) {
+        out.fillStyle = color;
+        out.fillRect(x, y, 1, 1);
+      }
+    });
+    // Rellena los píxeles vacíos con el mismo fondo del lienzo.
+    for (let y = 0; y < SIZE; y++) for (let x = 0; x < SIZE; x++) {
+      if (!pixels[`${x}_${y}`]) { out.fillStyle = "#202532"; out.fillRect(x, y, 1, 1); }
+    }
+    const link = document.createElement("a");
+    link.download = "pixel-place-compartido.png";
+    link.href = output.toDataURL("image/png");
+    link.click();
+  });
+  render();
+</script>
+</body>
+</html>
